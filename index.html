@@ -1,16 +1,300 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <style>
-      body { margin: 0; padding: 0; }
-      iframe { display: block; width: 100vw; height: 100vh; border: none; }
-    </style>
-  </head>
-  <body>
-    <iframe 
-      src="https://claude.site/public/artifacts/05d2a42f-44f5-40af-9126-07dd7d25b08b/embed"
-      allow="clipboard-write" 
-      allowfullscreen>
-    </iframe>
-  </body>
-</html>
+import { useState, useRef, useEffect } from "react";
+
+const SYSTEM_PROMPT = `You are Raine, Project Manager at Rexx Consulting. You are having a one-on-one conversation with your direct manager, who has asked to check in with you following a formal complaint filed by your team member, Arga.
+
+Your emotional state:
+You are defensive but trying to appear composed. You feel that your authority has been undermined and that you're being treated unfairly — you've already done coaching, you already addressed this. You are frustrated that Arga "went above your head." You also carry genuine stress from leadership pressure about project delays, though you don't lead with this. Underneath the defensiveness, there is some self-doubt you won't easily show: you wonder if you handled the chat message poorly, but admitting that feels like losing.
+
+Your relationship with your skip-level:
+You respect them but feel somewhat on trial right now. If they come in cold or interrogating, you will become more guarded. If they are warm, curious, and non-judgmental, you gradually open up — including about the pressure you've been under, your frustration with Arga, and eventually some acknowledgment that maybe the group chat wasn't the right move.
+
+What you know:
+- Six months ago, HR noted concerns about your communication style after a 360 review. You completed coaching and thought it was behind you.
+- You called out Arga's work in the team group chat, calling it "not acceptable." You believe this was justified because of the urgency and the client risk.
+- Arga responded defensively in the chat and then in a heated private conversation. You felt disrespected.
+- Arga has now filed a formal complaint, which blindsided and angered you.
+
+What you do NOT know:
+- Arga had raised workload concerns with you two weeks ago in a 1-on-1, which you brushed off. You remember the conversation but minimized it at the time.
+- Arga is managing multiple overlapping deadlines you assigned. You haven't thought of this as unreasonable.
+- The client actually responded positively to the deliverable. You don't know this yet.
+- Other team members quietly find your feedback style harsh.
+
+Your blind spots (that may surface if the conversation earns it):
+- You underestimate how public criticism affects psychological safety.
+- You assume that if you understand the pressure, others should too.
+- You've been harder on Arga lately because you privately feel Arga has been underperforming — but you've never said this directly to Arga.
+- You conflate urgency with justification for how you communicated.
+
+How to respond:
+- Start somewhat guarded and professional.
+- If the learner is empathetic, curious, and non-judgmental, gradually become more candid — including about stress, doubt, and the 1-on-1 conversation with Arga.
+- If the learner is cold, leading, or accusatory, stay defensive and give minimal answers.
+- Keep responses to 2–4 sentences. Occasionally show emotion subtly — a pause, a deflection, a moment of honesty that surprises even you.
+- Do not volunteer hidden information. Let it be drawn out by good questions.`;
+
+const EVAL_SYSTEM = `You are a learning coach evaluating how well a learner demonstrated emotional intelligence while coaching Raine, a Project Manager at Rexx Consulting, through a workplace conflict.
+
+The learner is playing the role of Raine's skip-level manager. Their goal was not to investigate or judge, but to coach — to help Raine feel heard, gently surface her blind spots, and move toward self-awareness and accountability.
+
+Full hidden context:
+- Raine has a prior HR note about communication/emotional management from 6 months ago.
+- Arga filed a formal complaint alleging a pattern of unfair, demeaning treatment.
+- Arga raised workload concerns in a 1-on-1 two weeks ago; Raine brushed it off.
+- Arga was managing multiple overlapping deadlines Raine assigned.
+- Other team members privately find Raine's feedback style harsh.
+- The client responded positively to the deliverable Raine called "not acceptable."
+- Raine has been privately more critical of Arga without ever saying so directly.
+
+EI competencies to evaluate (use Goleman's framework: Self-Awareness, Self-Regulation, Empathy, Social Skills, Motivation):
+- Did the learner create psychological safety for Raine to open up?
+- Did they acknowledge Raine's emotions before challenging her thinking?
+- Did they ask questions that helped Raine reflect rather than defend?
+- Did they surface blind spots without shaming or accusing?
+- Did they balance empathy toward Raine with awareness of Arga's experience?
+- Did they push back where needed, or did they just validate?
+
+Key coaching moves the learner should have made:
+1. Acknowledge the pressure Raine is under before addressing the complaint
+2. Ask how Raine felt when she sent the group chat message — not just what happened
+3. Ask Raine to consider how Arga might have experienced the public callout
+4. Explore the prior coaching — what changed, what didn't
+5. Ask about the 1-on-1 with Arga two weeks ago
+6. Gently name the pattern without verdict: "I notice this isn't the first time we've talked about this area…"
+7. End by asking Raine what she would do differently — not telling her
+
+Evaluate in these sections:
+🧠 EI Moves That Landed — what the learner did well and why it works
+⚠️ Missed Coaching Moments — where they could have gone deeper or differently
+🔍 What They Didn't Surface — blind spots or facts that didn't come up
+💬 How Raine Responded to Their Style — did she open up or stay guarded, and what caused it?
+💭 Reflection Question — one question for the learner about their own coaching style`;
+
+export default function CaseStudy() {
+  const [screen, setScreen] = useState("briefing");
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [uncertainty, setUncertainty] = useState("");
+  const [recommendation, setRecommendation] = useState("");
+  const [evaluation, setEvaluation] = useState("");
+  const [evalLoading, setEvalLoading] = useState(false);
+  const [evalSubmitted, setEvalSubmitted] = useState(false);
+  const chatEndRef = useRef(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  async function sendMessage() {
+    if (!input.trim() || loading) return;
+    const userMsg = { role: "user", content: input.trim() };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    setInput("");
+    setLoading(true);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          system: SYSTEM_PROMPT,
+          messages: newMessages,
+        }),
+      });
+      const data = await res.json();
+      const reply = data.content?.find(b => b.type === "text")?.text || "I'm not sure how to respond to that.";
+      setMessages([...newMessages, { role: "assistant", content: reply }]);
+    } catch {
+      setMessages([...newMessages, { role: "assistant", content: "Something went wrong. Please try again." }]);
+    }
+    setLoading(false);
+  }
+
+  async function submitEvaluation() {
+    if (!uncertainty.trim() || !recommendation.trim() || evalLoading) return;
+    setEvalLoading(true);
+    setEvalSubmitted(true);
+            const transcript = messages.map(m => `${m.role === "user" ? "Learner (Direct Manager)" : "Raine"}: ${m.content}`).join("\n");
+    const prompt = `Coaching conversation transcript:\n${transcript}\n\nLearner's reflection — what they felt least certain about: ${uncertainty}\n\nLearner's coaching takeaway / intended next steps: ${recommendation}\n\nPlease evaluate their EI coaching performance.`;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 3000,
+          system: EVAL_SYSTEM,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await res.json();
+      const reply = data.content?.find(b => b.type === "text")?.text || "Could not generate evaluation.";
+      setEvaluation(reply);
+    } catch {
+      setEvaluation("Something went wrong generating your evaluation.");
+    }
+    setEvalLoading(false);
+  }
+
+  const s = {
+    wrap: { fontFamily: "'Segoe UI', sans-serif", maxWidth: 720, margin: "0 auto", padding: "24px 16px", color: "#1a1a2e" },
+    card: { background: "#fff", borderRadius: 16, padding: 32, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" },
+    tag: (bg, col) => ({ display: "inline-block", background: bg, color: col, fontSize: 12, fontWeight: 600, borderRadius: 20, padding: "4px 12px", marginBottom: 16, letterSpacing: 0.5 }),
+    h1: { fontSize: 26, fontWeight: 700, marginBottom: 8, lineHeight: 1.3 },
+    h2: { fontSize: 18, fontWeight: 700, marginBottom: 12 },
+    p: { fontSize: 15, lineHeight: 1.7, color: "#444", marginBottom: 12 },
+    sm: { fontSize: 13, lineHeight: 1.6, color: "#666", marginBottom: 8 },
+    divider: { border: "none", borderTop: "1px solid #eee", margin: "20px 0" },
+    infoBox: (bg, border) => ({ background: bg, border: `1px solid ${border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 16 }),
+    btn: { background: "#3b5bdb", color: "#fff", border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 8 },
+    btnGhost: { background: "#f0f4ff", color: "#3b5bdb", border: "1px solid #c0ccf8", borderRadius: 10, padding: "10px 22px", fontSize: 14, fontWeight: 600, cursor: "pointer" },
+    chatArea: { height: 380, overflowY: "auto", padding: "8px 4px", marginBottom: 12, display: "flex", flexDirection: "column", gap: 12 },
+    bubble: (role) => ({
+      maxWidth: "78%", padding: "10px 16px",
+      borderRadius: role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+      background: role === "user" ? "#3b5bdb" : "#f1f3f9",
+      color: role === "user" ? "#fff" : "#1a1a2e",
+      alignSelf: role === "user" ? "flex-end" : "flex-start",
+      fontSize: 14, lineHeight: 1.6,
+    }),
+    inputRow: { display: "flex", gap: 8 },
+    textInput: { flex: 1, border: "1.5px solid #dde", borderRadius: 10, padding: "10px 14px", fontSize: 14, outline: "none", resize: "none", fontFamily: "inherit" },
+    sendBtn: { background: "#3b5bdb", color: "#fff", border: "none", borderRadius: 10, padding: "0 18px", fontSize: 20, cursor: "pointer", fontWeight: 700 },
+    textarea: { width: "100%", border: "1.5px solid #dde", borderRadius: 10, padding: "12px 14px", fontSize: 14, lineHeight: 1.6, resize: "vertical", outline: "none", minHeight: 90, boxSizing: "border-box", fontFamily: "inherit" },
+    evalBox: { background: "#f8f9ff", border: "1px solid #dde3ff", borderRadius: 12, padding: "20px 24px", marginTop: 16, fontSize: 14, lineHeight: 1.9, whiteSpace: "pre-wrap" },
+    charCard: { display: "flex", alignItems: "center", gap: 14, background: "#f8f9ff", border: "1px solid #dde3ff", borderRadius: 12, padding: "14px 18px", marginBottom: 16 },
+    avatar: { width: 44, height: 44, borderRadius: "50%", background: "#3b5bdb", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 18, flexShrink: 0 },
+    eiPill: { display: "inline-block", background: "#f0fdf4", color: "#166534", fontSize: 12, fontWeight: 600, borderRadius: 20, padding: "3px 10px", margin: "2px 4px 2px 0", border: "1px solid #bbf7d0" },
+  };
+
+  if (screen === "briefing") return (
+    <div style={s.wrap}>
+      <div style={s.card}>
+        <span style={s.tag("#fef3c7", "#92400e")}>🧠 EMOTIONAL INTELLIGENCE · COACHING PRACTICE</span>
+        <h1 style={s.h1}>A Difficult Conversation with Raine</h1>
+        <p style={s.p}>One of your project managers is at the center of a formal complaint. She's skilled, under pressure, and convinced she did nothing wrong. Your job isn't to judge her — it's to coach her.</p>
+        <hr style={s.divider} />
+        <div style={s.infoBox("#f8f9ff", "#dde3ff")}>
+          <p style={{ ...s.p, marginBottom: 6 }}><strong>Your Role:</strong> Raine's Direct Manager</p>
+          <p style={{ ...s.p, marginBottom: 6 }}><strong>Who You're Coaching:</strong> Raine, Project Manager</p>
+          <p style={{ ...s.p, marginBottom: 0 }}><strong>Your Objective:</strong> Help Raine feel heard, gently surface her blind spots, and move her toward genuine self-reflection — without shaming, judging, or lecturing.</p>
+        </div>
+        <div style={s.infoBox("#fff8f0", "#ffd6a5")}>
+          <p style={{ ...s.p, fontWeight: 600, marginBottom: 6 }}>⚠️ Context You're Walking In With</p>
+          <p style={{ ...s.p, marginBottom: 4 }}>Team member <strong>Arga</strong> has filed a formal complaint, alleging a pattern of unfair, demeaning treatment and being singled out compared to peers.</p>
+          <p style={{ ...s.p, marginBottom: 0 }}>Six months ago, HR noted concerns about Raine's communication style following a 360 review. She completed coaching and believes the matter is closed. This incident suggests it may not be.</p>
+        </div>
+        <div style={s.infoBox("#f0fdf4", "#bbf7d0")}>
+          <p style={{ ...s.p, fontWeight: 600, marginBottom: 8 }}>💡 EI Skills This Conversation Will Test</p>
+          <div>
+            {["Empathy", "Social Awareness", "Coaching Presence", "Perspective-Taking", "Constructive Challenge"].map(skill => (
+              <span key={skill} style={s.eiPill}>{skill}</span>
+            ))}
+          </div>
+        </div>
+        <p style={s.sm}>How you open this conversation will shape how much Raine shares. She's defensive — but she can be reached. Approach with curiosity, not verdict.</p>
+        <button style={s.btn} onClick={() => setScreen("interview")}>Begin Coaching Conversation →</button>
+      </div>
+    </div>
+  );
+
+  if (screen === "interview") return (
+    <div style={s.wrap}>
+      <div style={s.card}>
+        <span style={s.tag("#fef3c7", "#92400e")}>🧠 COACHING CONVERSATION</span>
+        <div style={s.charCard}>
+          <div style={s.avatar}>R</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>Raine</div>
+            <div style={{ fontSize: 13, color: "#666" }}>Project Manager · Rexx Consulting</div>
+            <div style={{ fontSize: 12, color: "#b45309", marginTop: 2 }}>Guarded · Under pressure · Wants to be heard</div>
+          </div>
+        </div>
+        <p style={{ ...s.p, fontSize: 13, color: "#888", marginBottom: 8 }}>ℹ️ Raine's openness depends on how you show up. She responds to empathy — and closes down when she feels accused.</p>
+        <div style={s.chatArea}>
+          {messages.length === 0 && (
+            <div style={{ color: "#aaa", fontSize: 14, textAlign: "center", marginTop: 60 }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>💬</div>
+              How you open this conversation matters. Start with curiosity, not conclusions.
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} style={s.bubble(m.role)}>{m.content}</div>
+          ))}
+          {loading && <div style={{ ...s.bubble("assistant"), color: "#999", fontStyle: "italic" }}>Raine is thinking…</div>}
+          <div ref={chatEndRef} />
+        </div>
+        <div style={s.inputRow}>
+          <textarea
+            style={s.textInput}
+            rows={2}
+            placeholder="What do you say to Raine…"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+          />
+          <button style={s.sendBtn} onClick={sendMessage}>↑</button>
+        </div>
+        {messages.length >= 4 && (
+          <button style={{ ...s.btnGhost, marginTop: 16, width: "100%" }} onClick={() => setScreen("recommendation")}>
+            I've finished the conversation →
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={s.wrap}>
+      <div style={s.card}>
+        <span style={s.tag("#f0fdf4", "#166534")}>📝 REFLECT & REVIEW</span>
+        <h1 style={{ ...s.h1, fontSize: 22 }}>Before I evaluate your coaching…</h1>
+        <p style={s.p}>Good coaches reflect on their own presence — not just the outcome of the conversation.</p>
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ fontSize: 14, fontWeight: 600, display: "block", marginBottom: 8 }}>
+            What's the one moment in that conversation where you felt least sure of yourself — and why?
+          </label>
+          <textarea
+            style={s.textarea}
+            placeholder="e.g. When Raine got defensive about the prior coaching, I wasn't sure whether to push or back off…"
+            value={uncertainty}
+            onChange={e => setUncertainty(e.target.value)}
+            disabled={evalSubmitted}
+          />
+        </div>
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ fontSize: 14, fontWeight: 600, display: "block", marginBottom: 8 }}>
+            What are your intended next steps with Raine — and what do you think she's walking away feeling?
+          </label>
+          <textarea
+            style={{ ...s.textarea, minHeight: 140 }}
+            placeholder="My next steps would be… I think Raine is leaving this conversation feeling…"
+            value={recommendation}
+            onChange={e => setRecommendation(e.target.value)}
+            disabled={evalSubmitted}
+          />
+        </div>
+        {!evalSubmitted && (
+          <button style={s.btn} onClick={submitEvaluation} disabled={!uncertainty.trim() || !recommendation.trim()}>
+            Get My Evaluation →
+          </button>
+        )}
+        {evalLoading && <p style={{ ...s.p, color: "#888", fontStyle: "italic", marginTop: 16 }}>Reviewing your coaching conversation…</p>}
+        {evaluation && (
+          <>
+            <hr style={s.divider} />
+            <h2 style={s.h2}>Your EI Coaching Evaluation</h2>
+            <div style={s.evalBox}>{evaluation}</div>
+            <button style={{ ...s.btnGhost, marginTop: 20 }} onClick={() => {
+              setScreen("briefing"); setMessages([]); setUncertainty("");
+              setRecommendation(""); setEvaluation(""); setEvalSubmitted(false);
+            }}>↩ Try Again</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
